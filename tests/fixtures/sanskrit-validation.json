@@ -1,0 +1,57 @@
+{
+  "title": "Sanskrit offline review validation cards",
+  "description": "Synthetic examples only; no personal Anki notes or generated audio.",
+  "cases": [
+    {
+      "id": "cross-script-rama-visarga",
+      "Exercise Type": "script",
+      "prompt": "rāmaḥ",
+      "Answer-Devanagari": "रामः",
+      "Answer-IAST": "rāmaḥ",
+      "Answer-ISO15919": "rāmaḥ",
+      "expected_cross_script_match": true
+    },
+    {
+      "id": "long-short-vowel-distinction",
+      "Exercise Type": "morphology",
+      "prompt": "kā",
+      "Answer-Devanagari": "का",
+      "spoken_variant": "क",
+      "expected_spoken_variant_match": false
+    },
+    {
+      "id": "retroflex-aspirate",
+      "Exercise Type": "script",
+      "prompt": "ṭhā",
+      "Answer-Devanagari": "ठा",
+      "Answer-IAST": "ṭhā",
+      "Answer-ISO15919": "ṭhā",
+      "expected_cross_script_match": true
+    },
+    {
+      "id": "anusvara-visarga-distinction",
+      "Exercise Type": "vocabulary",
+      "prompt": "aṃ",
+      "Answer-Devanagari": "अं",
+      "spoken_variant": "अः",
+      "expected_spoken_variant_match": false
+    },
+    {
+      "id": "listed-sandhi-variant",
+      "Exercise Type": "morphology",
+      "prompt": "नरः + अपि",
+      "Answer-Devanagari": "नरः",
+      "Accepted answers": "नरो",
+      "grading_mode": "accepted",
+      "spoken_variant": "नरो",
+      "expected_spoken_variant_match": true
+    },
+    {
+      "id": "translation-manual",
+      "Exercise Type": "translation",
+      "prompt": "Translate this sentence",
+      "Answer-Devanagari": "रामः पठति।",
+      "expected_grading": "manual"
+    }
+  ]
+}

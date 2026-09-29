@@ -5,6 +5,10 @@ This fork keeps the upstream add-on's original MIT license and targets Anki
 repository name is hyphenated, but the installed add-on folder must be a valid
 Python package name).
 
+For the offline Sanskrit setup, deck template/fields, and validation status,
+see [docs/offline-sanskrit.md](docs/offline-sanskrit.md) and
+[docs/sanskrit-deck.md](docs/sanskrit-deck.md).
+
 🎤 **Review Anki cards completely hands-free using voice!**
 
 Cards are read aloud, you answer verbally, and your answers are automatically scored and rated. Perfect for language learning, studying while commuting, or accessibility needs.
