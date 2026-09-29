@@ -177,18 +177,21 @@ class DeckSettings:
     language: str = ""  # Language code (de, en, etc.) - empty means use default
     include_fields: list[str] = field(
         default_factory=list)  # Fields to read (empty = all)
+    grading_mode: str = ""  # Per-deck Sanskrit mode: strict, accepted, manual
 
     def to_dict(self) -> dict:
         return {
             "language": self.language,
-            "include_fields": self.include_fields
+            "include_fields": self.include_fields,
+            "grading_mode": self.grading_mode,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "DeckSettings":
         return cls(
             language=data.get("language", ""),
-            include_fields=data.get("include_fields", [])
+            include_fields=data.get("include_fields", []),
+            grading_mode=data.get("grading_mode", ""),
         )
 
 
@@ -200,7 +203,7 @@ class DeckSettingsConfig:
     deck_settings: str = "{}"  # JSON dict
 
     # Default fields to skip when no deck-specific settings
-    default_skip_fields: str = "ID,Audio,Sound,Comments,Attribution,Tags,Source,Reference,Notes,Extra"
+    default_skip_fields: str = "ID,Audio,Sound,Comments,Attribution,Tags,Source,Reference,Notes,Extra,Grading Mode,Exercise Type,Card Type,Response Type,Accepted answers"
 
     def get_settings_for_deck(self, deck_name: str) -> DeckSettings | None:
         """Get settings for a specific deck, or None if not set."""
@@ -222,18 +225,31 @@ class DeckSettingsConfig:
         settings = self.get_settings_for_deck(deck_name)
         return settings.include_fields if settings and settings.include_fields else None
 
+    def get_grading_mode_for_deck(self, deck_name: str) -> str | None:
+        settings = self.get_settings_for_deck(deck_name)
+        return settings.grading_mode if settings and settings.grading_mode else None
+
     def get_default_skip_fields(self) -> list[str]:
         """Get the default fields to skip."""
         return [f.strip() for f in self.default_skip_fields.split(",") if f.strip()]
 
-    def set_settings_for_deck(self, deck_name: str, language: str, include_fields: list[str]):
+    def set_settings_for_deck(
+        self,
+        deck_name: str,
+        language: str,
+        include_fields: list[str],
+        grading_mode: str = "",
+    ):
         """Set settings for a specific deck."""
         try:
             mapping = json.loads(self.deck_settings)
         except:
             mapping = {}
         mapping[deck_name] = DeckSettings(
-            language=language, include_fields=include_fields).to_dict()
+            language=language,
+            include_fields=include_fields,
+            grading_mode=grading_mode,
+        ).to_dict()
         self.deck_settings = json.dumps(mapping)
 
     def remove_deck(self, deck_name: str):

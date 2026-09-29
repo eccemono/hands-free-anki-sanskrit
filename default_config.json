@@ -101,6 +101,6 @@
   },
   "deck_settings": {
     "deck_settings": "{}",
-    "default_skip_fields": "ID,Audio,Sound,Comments,Tags,Source,Reference,Notes,Extra"
+    "default_skip_fields": "ID,Audio,Sound,Comments,Tags,Source,Reference,Notes,Extra,Grading Mode,Exercise Type,Card Type,Response Type,Accepted answers"
   }
 }
