@@ -95,16 +95,35 @@ are missing, the grader safely falls back to manual rating.
 
 ## Validation record
 
-Environment: Linux Mint, Anki 26.09.3, NVIDIA GeForce RTX 4070 Ti. The local
-Whisper `medium` CUDA model loads and runs with language `sa` and network access
-disabled. A synthetic silence test correctly produced an empty transcript. A
-local Sanskrit TTS generation returned a 122,958-byte WAV without network
-fallback. Whisper returned an empty transcript for that generated sample, so
-recognition quality on spoken Sanskrit audio remains unvalidated.
+Environment: Linux Mint, Anki 26.09.3, NVIDIA GeForce RTX 4070 Ti. Disposable
+profiles under `/tmp/opencode/` were used; the real `User 1` profile and
+collection were not opened or modified. Anki safe mode was off. Startup reached
+the main loop and the add-on log recorded `Hands-Free Anki addon loaded` without
+bundled speech dependencies.
 
-The disposable Anki GUI/profile smoke test could not be run while the existing
-Anki GUI was open: a launch with a separate base/profile was intercepted with
-“Already running; reusing existing instance.” The live `User 1` session was
-left untouched. Therefore add-on GUI startup, in-Anki audio playback, microphone
-capture, and actual manual/strict review flow remain pending that smoke test.
-Do not treat them as passed based on the unit tests.
+In the local-speech profile, `TTSService.speak()` on `sa-IN` synthesized and
+played a Sanskrit WAV through PulseAudio with the `sanskrit_local`-only provider
+chain. An initial ALSA device error was visible and did not trigger fallback;
+selecting the running PulseAudio server allowed playback to succeed. The same
+profile passed 10.1 seconds of real EMEET microphone capture to the local CUDA
+Whisper worker with `sa-IN`, even with Google and Sphinx fallback flags enabled;
+the observed chain contained only `offline_whisper`. It returned non-empty
+English text from ambient speech, not a known Sanskrit utterance. Sanskrit
+recognition accuracy on a spoken Sanskrit sample is therefore not established.
+
+Strict cross-script grading returned correct for IAST/Devanagari-equivalent
+`rāmaḥ`/`रामः` and incorrect for an unlisted `नरो` variant. Accepted mode matched
+the explicitly listed `नरो`. A translation note returned manual mode, and the
+actual `HandsFreeReviewer._process_question()` / `_manual_rate_current_card()`
+path requested and applied a test rating of 3 using isolated test doubles for
+speech input and the Anki rating callback; no semantic translation score was
+used. These checks ran inside the disposable Anki process against its loaded
+add-on.
+
+On a later combined profile run, local TTS and all grading checks passed, but
+the Whisper worker could not load because CUDA reported out of memory (about
+3.7 GB was free while another process held about 6.8 GB). The earlier local
+speech profile run did successfully load the same local medium CUDA model and
+process real microphone audio. This transient memory-limited rerun is recorded
+as a failure, not a pass. The source fixture contains synthetic text cases only;
+it has no user collection data or generated audio.
