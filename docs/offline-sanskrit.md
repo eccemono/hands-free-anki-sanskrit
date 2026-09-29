@@ -127,3 +127,25 @@ speech profile run did successfully load the same local medium CUDA model and
 process real microphone audio. This transient memory-limited rerun is recorded
 as a failure, not a pass. The source fixture contains synthetic text cases only;
 it has no user collection data or generated audio.
+
+### Known-audio local Whisper check
+
+On 2026-09-29, two supplied FLAC recordings were decoded in memory and passed
+through `STTService._recognize_audio()` in a fresh disposable Anki profile. The
+service used Faster-Whisper `medium` on CUDA with `int8_float16`, configured
+language `sa-IN` (the worker receives `sa`), and the observed provider chain was
+only `offline_whisper`, with Hugging Face/Transformers offline flags set. The
+GPU had 10,841 MiB free before inference and 9,662 MiB free while the local
+worker used 1,172 MiB.
+
+For the Sanskrit phrase, local Whisper returned `नमस्ते, रामह पत्थति`. After
+ignoring punctuation and spaces, this is `नमस्तेरामहपत्थति`, not the expected
+`नमस्तेरामःपठति`: the visarga and aspirated consonant were not recognized
+correctly. Therefore **known-Sanskrit recognition did not pass**, despite the
+worker completing successfully. The second recording returned `3`, which
+`HandsFreeReviewer._parse_voice_rating()` resolved to rating 3. The rating
+check passed. The supplied recordings were read-only inputs; no audio copies
+were placed in the repository or committed. Do not treat this single local
+recognition result as a Sanskrit-accuracy pass; a general recognition
+improvement and another known-audio validation are needed before merging the
+stack under the current validation gate.
