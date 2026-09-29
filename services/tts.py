@@ -5,13 +5,17 @@ import hashlib
 import hmac
 import json
 import os
+import select
+import subprocess
 import tempfile
 import threading
 from datetime import datetime
+from pathlib import Path
 
 import requests
 
 from ..config import TTSConfig
+from .language_policy import is_sanskrit_language, tts_provider_chain
 
 
 class TTSService:
@@ -25,6 +29,8 @@ class TTSService:
         self._current_rate = config.rate  # Current speaking rate
         self._current_language = config.language  # Current language
         self._stop_requested = False  # Flag to stop current speech
+        self._sanskrit_worker = None
+        self._sanskrit_worker_lock = threading.Lock()
 
     def set_debug_logger(self, logger):
         """Set an external debug logger function."""
@@ -69,7 +75,7 @@ class TTSService:
 
                     # Try to set voice based on language
                     voices = self._pyttsx3_engine.getProperty('voices')
-                    lang_code = "german" if self.config.language == "de" else "english"
+                    lang_code = "german" if self._current_language.lower().startswith("de") else "english"
 
                     for voice in voices:
                         if lang_code in voice.name.lower() or lang_code in str(voice.languages).lower():
@@ -98,7 +104,8 @@ class TTSService:
         text = self._clean_html(text)
 
         # Debug: show provider chain
-        chain = self._provider_chain()
+        sanskrit_review = self._is_sanskrit_language(self._current_language)
+        chain = tts_provider_chain(self.config.providers, self._current_language)
         self._log(f"Provider chain: {chain}")
 
         for provider in chain:
@@ -121,13 +128,78 @@ class TTSService:
             except Exception as e:
                 self._log(f"{provider} FAILED: {e}", "error")
 
+        if sanskrit_review:
+            self._log("Local Sanskrit TTS failed; refusing non-Sanskrit fallback", "error")
+            return False
+
         self._log("All providers failed, using offline fallback", "warning")
         return self._speak_offline(text, blocking)
+
+    @staticmethod
+    def _is_sanskrit_language(language: str) -> bool:
+        return is_sanskrit_language(language)
+
+    def _request_sanskrit_tts(self, text: str) -> Path:
+        python = Path(self.config.sanskrit_runtime_python).expanduser()
+        runtime_root = Path(self.config.sanskrit_runtime_root).expanduser()
+        runtime_worker = Path(self.config.sanskrit_runtime_worker).expanduser()
+        wrapper = Path(__file__).with_name("local_sanskrit_tts_worker.py")
+        if not python.is_file():
+            raise FileNotFoundError(f"Local Sanskrit TTS Python runtime is missing: {python}")
+        if not runtime_worker.is_file():
+            raise FileNotFoundError(f"Local Sanskrit TTS model worker is missing: {runtime_worker}")
+
+        with self._sanskrit_worker_lock:
+            process = self._sanskrit_worker
+            if process is None or process.poll() is not None:
+                env = os.environ.copy()
+                env.pop("PYTHONHOME", None)
+                env.pop("PYTHONPATH", None)
+                env["HF_HOME"] = str(runtime_root / "models")
+                env["HF_HUB_OFFLINE"] = "1"
+                env["TRANSFORMERS_OFFLINE"] = "1"
+                process = subprocess.Popen(
+                    [str(python), "-u", str(wrapper), "--runtime-root", str(runtime_root),
+                     "--runtime-worker", str(runtime_worker)],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    encoding="utf-8",
+                    bufsize=1,
+                    env=env,
+                )
+                self._sanskrit_worker = process
+
+            if process.stdin is None or process.stdout is None:
+                raise RuntimeError("Local Sanskrit TTS worker has no input/output pipe")
+            timeout = float(self.config.sanskrit_timeout)
+            process.stdin.write(json.dumps({"text": text, "speed": max(0.5, min(2.0, self._current_rate / 150))}) + "\n")
+            process.stdin.flush()
+            ready, _, _ = select.select([process.stdout], [], [], timeout)
+            if not ready:
+                process.kill()
+                self._sanskrit_worker = None
+                raise TimeoutError(f"Local Sanskrit TTS exceeded its {timeout:g}-second timeout")
+            response = json.loads(process.stdout.readline())
+            if not response.get("ok"):
+                raise RuntimeError(response.get("error", "Sanskrit synthesis failed"))
+            return Path(response["path"])
+
+    def _speak_sanskrit_local(self, text: str, blocking: bool) -> bool:
+        if not self._is_sanskrit_language(self._current_language):
+            return False
+        output = self._request_sanskrit_tts(text)
+        try:
+            return self._play_audio_file(str(output), blocking)
+        finally:
+            if blocking:
+                output.unlink(missing_ok=True)
 
     def _provider_chain(self) -> list[str]:
         """Return ordered provider list with offline safety net."""
         chain = [p for p in self.config.providers if p in {
-            "elevenlabs", "google_cloud", "amazon_polly", "gtts", "offline"
+            "sanskrit_local", "elevenlabs", "google_cloud", "amazon_polly", "gtts", "offline"
         }]
         if "offline" not in chain:
             chain.append("offline")
@@ -346,7 +418,7 @@ class TTSService:
     def _speak_gtts(self, text: str, blocking: bool) -> bool:
         from gtts import gTTS
 
-        lang = "de" if self.config.language == "de" else "en"
+        lang = "de" if self._current_language.lower().startswith("de") else "en"
         tts = gTTS(text=text, lang=lang)
 
         with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
@@ -514,6 +586,12 @@ class TTSService:
                 self._pyttsx3_engine.stop()
             except:
                 pass
+
+        with self._sanskrit_worker_lock:
+            if self._sanskrit_worker is not None:
+                if self._sanskrit_worker.poll() is None:
+                    self._sanskrit_worker.terminate()
+                self._sanskrit_worker = None
 
     def cleanup(self):
         """Clean up resources."""

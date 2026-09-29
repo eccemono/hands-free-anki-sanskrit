@@ -2,16 +2,22 @@
 Speech-to-Text service with Voice Activity Detection and multi-provider support.
 """
 
+import base64
 import io
+import json
 import os
+import select
+import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Optional, Callable
 
 import requests
 
 from ..config import STTConfig, LLMConfig
 from ..utils import is_online
+from .language_policy import is_sanskrit_language, map_language_code, stt_provider_chain
 
 
 class STTService:
@@ -30,6 +36,9 @@ class STTService:
         self._openai_client = None
         self._openai_api_key = None
         self._debug_logger = None  # Optional external logger
+        self._local_whisper_process = None
+        self._local_whisper_lock = threading.Lock()
+        self.last_error: str | None = None
 
         if llm_config and llm_config.openai_api_key:
             self._openai_api_key = llm_config.openai_api_key
@@ -250,7 +259,18 @@ class STTService:
         self._log(f"Provider chain: {chain}")
 
         for provider in chain:
-            if provider == "elevenlabs":
+            if provider == "offline_whisper":
+                try:
+                    text = self._recognize_with_local_whisper(audio)
+                    self.last_error = None
+                    if text:
+                        self._log("Local Whisper: SUCCESS", "success")
+                        return text
+                except Exception as e:
+                    self.last_error = str(e)
+                    self._log(f"Local Whisper FAILED: {e}", "error")
+                    return None
+            elif provider == "elevenlabs":
                 if not self._can_use_elevenlabs():
                     self._log(f"elevenlabs: No API key configured", "warning")
                     continue
@@ -312,34 +332,95 @@ class STTService:
 
     def _build_provider_chain(self) -> list[str]:
         """Create ordered list of STT providers to attempt."""
-        chain: list[str] = []
-
-        def add(provider: str):
-            if provider not in chain:
-                chain.append(provider)
-
-        add(self.config.provider)
-        if self.config.enable_google_fallback:
-            add("google")
-        if self.config.enable_sphinx_fallback:
-            add("sphinx")
-        return chain
+        return stt_provider_chain(
+            self.config.provider,
+            self.config.language,
+            self.config.enable_google_fallback,
+            self.config.enable_sphinx_fallback,
+        )
 
     def _map_language_code(self, configured: str) -> str:
         """Normalize language code for provider compatibility."""
-        lang_map = {
-            "en-US": "en-US",
-            "en": "en-US",
-            "de-DE": "de-DE",
-            "de": "de-DE",
-        }
-        return lang_map.get(configured, "en-US")
+        return map_language_code(configured)
+
+    @staticmethod
+    def _is_sanskrit_language(language: str) -> bool:
+        return is_sanskrit_language(language)
+
+    def set_language(self, language: str) -> None:
+        """Select the transcription language for the current deck."""
+        self.config.language = language or "en-US"
+
+    def _recognize_with_local_whisper(self, audio) -> Optional[str]:
+        python = Path(self.config.local_whisper_python).expanduser()
+        runtime_root = Path(self.config.local_whisper_runtime_root).expanduser()
+        model_path = Path(self.config.local_whisper_model_path).expanduser()
+        worker = Path(__file__).with_name("local_whisper_worker.py")
+        if not python.is_file():
+            raise FileNotFoundError(f"Local Whisper Python runtime is missing: {python}")
+        if not model_path.is_dir():
+            raise FileNotFoundError(
+                f"Local Whisper model is missing at {model_path}; run tools/setup_local_whisper.py first."
+            )
+
+        with self._local_whisper_lock:
+            process = self._local_whisper_process
+            if process is None or process.poll() is not None:
+                env = os.environ.copy()
+                env.pop("PYTHONHOME", None)
+                env.pop("PYTHONPATH", None)
+                env["HF_HOME"] = str(runtime_root / "models")
+                env["HF_HUB_OFFLINE"] = "1"
+                env["TRANSFORMERS_OFFLINE"] = "1"
+                cuda_library_dirs = []
+                for site_packages in (python.parent.parent / "lib").glob("python*/site-packages"):
+                    for library in ("cublas/lib", "cudnn/lib"):
+                        path = site_packages / "nvidia" / library
+                        if path.is_dir():
+                            cuda_library_dirs.append(str(path))
+                if cuda_library_dirs:
+                    env["LD_LIBRARY_PATH"] = os.pathsep.join(
+                        cuda_library_dirs + ([env["LD_LIBRARY_PATH"]] if env.get("LD_LIBRARY_PATH") else [])
+                    )
+                process = subprocess.Popen(
+                    [str(python), "-u", str(worker)],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    encoding="utf-8",
+                    bufsize=1,
+                    env=env,
+                )
+                self._local_whisper_process = process
+
+            if process.stdin is None or process.stdout is None:
+                raise RuntimeError("Local Whisper worker has no input/output pipe")
+            request = {
+                "audio_wav": base64.b64encode(audio.get_wav_data()).decode("ascii"),
+                "model_path": str(model_path),
+                "language": "sa" if self._is_sanskrit_language(self.config.language) else self.config.language.split("-")[0],
+                "device": self.config.local_whisper_device,
+                "compute_type": self.config.local_whisper_compute_type,
+            }
+            process.stdin.write(json.dumps(request) + "\n")
+            process.stdin.flush()
+            timeout = float(self.config.local_whisper_timeout)
+            ready, _, _ = select.select([process.stdout], [], [], timeout)
+            if not ready:
+                process.kill()
+                self._local_whisper_process = None
+                raise TimeoutError(f"Local Whisper exceeded its {timeout:g}-second timeout")
+            response = json.loads(process.stdout.readline())
+            if not response.get("ok"):
+                raise RuntimeError(response.get("error", "Local Whisper transcription failed"))
+            return str(response.get("text", "")).strip() or None
 
     def _can_use_google(self) -> bool:
         return is_online()
 
     def _can_use_sphinx(self, lang: str) -> bool:
-        return lang.startswith("en")
+        return lang.startswith("en") and not self._is_sanskrit_language(self.config.language)
 
     def _can_use_whisper(self) -> bool:
         if not is_online():
@@ -451,6 +532,11 @@ class STTService:
         """Stop any ongoing recording."""
         self._stop_event.set()
         self._is_recording = False
+        with self._local_whisper_lock:
+            process = self._local_whisper_process
+            self._local_whisper_process = None
+            if process is not None and process.poll() is None:
+                process.terminate()
 
     @property
     def is_recording(self) -> bool:

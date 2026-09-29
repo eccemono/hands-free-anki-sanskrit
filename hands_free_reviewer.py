@@ -299,6 +299,7 @@ class HandsFreeReviewer:
 
             # Set TTS language (deck-specific or default)
             self.tts.set_language(self._current_language)
+            self.stt.set_language(self._current_language)
 
             # Read card ease if configured
             if self.config.tts.read_card_ease:
@@ -313,7 +314,13 @@ class HandsFreeReviewer:
             if self._front_text:
                 self.debug_log(f"TTS: Speaking question", "tts")
                 self.tts.set_rate(self.config.tts.front_rate)
-                self.tts.speak(self._front_text, blocking=True)
+                spoken = self.tts.speak(self._front_text, blocking=True)
+                if not spoken and self.tts._is_sanskrit_language(self._current_language):
+                    self._handle_error(
+                        "Local Sanskrit TTS could not generate or play audio. "
+                        "Check the configured Sanskrit model runtime and local model files."
+                    )
+                    return
 
             if not self.is_active:
                 return
@@ -324,6 +331,9 @@ class HandsFreeReviewer:
                 on_recording_start=self._on_recording_start,
                 on_recording_end=self._on_recording_end,
             )
+            if self.stt.last_error:
+                self._handle_error(f"Local speech recognition failed: {self.stt.last_error}")
+                return
 
             # Show what was recognized on screen (debug)
             self._show_recognized_text(user_answer)
@@ -553,21 +563,36 @@ class HandsFreeReviewer:
     def _get_ease_description(self, card: Card) -> str:
         """Get description of card ease/status."""
         is_german = self.config.tts.language == "de"
+        is_sanskrit = self.tts._is_sanskrit_language(
+            getattr(self, "_current_language", self.config.tts.language)
+        )
 
         if card.type == 0:  # New card
+            if is_sanskrit:
+                return "नवीनं पत्रम्।"
             return "Neue Karte." if is_german else "New card."
         elif card.type == 1:  # Learning
+            if is_sanskrit:
+                return "अध्ययनपत्रम्।"
             return "Lernkarte." if is_german else "Learning card."
         elif card.type == 2:  # Review
             if card.factor:
                 ease_percent = card.factor / 10
                 if ease_percent >= 250:
+                    if is_sanskrit:
+                        return "सुपरिचितं पत्रम्।"
                     return "Gut bekannte Karte." if is_german else "Well known card."
                 elif ease_percent >= 200:
+                    if is_sanskrit:
+                        return "परिचितं पत्रम्।"
                     return "Bekannte Karte." if is_german else "Familiar card."
                 else:
+                    if is_sanskrit:
+                        return "कठिनं पत्रम्।"
                     return "Schwierige Karte." if is_german else "Difficult card."
         elif card.type == 3:  # Relearning
+            if is_sanskrit:
+                return "पुनरभ्यासपत्रम्।"
             return "Wiederholungskarte." if is_german else "Relearning card."
         return ""
 
@@ -903,6 +928,13 @@ class HandsFreeReviewer:
             "one": 1, "two": 2, "three": 3, "four": 4,
             # German words
             "eins": 1, "zwei": 2, "drei": 3, "vier": 4,
+            # Sanskrit cardinal words (IAST and common unaccented forms)
+            "eka": 1, "ekam": 1, "ekaṃ": 1,
+            "dve": 2,
+            "trīṇi": 3, "trini": 3,
+            "catvāri": 4, "catvari": 4,
+            # Sanskrit cardinal words (Devanagari)
+            "एकम्": 1, "एकं": 1, "द्वे": 2, "त्रीणि": 3, "चत्वारि": 4,
             # English rating names
             "again": 1, "hard": 2, "good": 3, "easy": 4,
             # German rating names
@@ -1004,7 +1036,20 @@ class HandsFreeReviewer:
 
     def _get_localized_prompt(self, key: str) -> str:
         """Get a localized prompt based on TTS language."""
-        is_german = self.config.tts.language == "de"
+        language = getattr(self, "_current_language", self.config.tts.language).lower()
+        is_german = language.startswith("de")
+
+        if language.startswith("sa"):
+            sanskrit_prompts = {
+                "your_answer": "भवतः उत्तरम्?",
+                "didnt_catch": "न श्रुतम्। उत्तरं दर्शयामि।",
+                "answer_was": "उत्तरम् आसीत्:",
+                "grading_error": "मूल्याङ्कने दोषः। कार्डं त्यजामि।",
+                "error_skip": "दोषः अभवत्। कार्डं त्यजामि।",
+                "say_rating_or_skip": "एकम्, द्वे, त्रीणि, चत्वारि वा वदतु; मौने कार्डं त्यजतु।",
+                "skipping": "त्यजामि।",
+            }
+            return sanskrit_prompts.get(key, "")
 
         prompts = {
             "your_answer": ("Deine Antwort?", "Your answer?"),
@@ -1025,7 +1070,15 @@ class HandsFreeReviewer:
     def _get_rating_announcement(self, rating: int) -> str:
         """Get audio announcement for rating. Uses custom phrases if set, otherwise defaults."""
         import random
-        is_german = self.config.tts.language == "de"
+        language = getattr(self, "_current_language", self.config.tts.language).lower()
+        if language.startswith("sa"):
+            return {
+                1: "पुनः प्रयत्नं कुरु।",
+                2: "किञ्चित् कठिनम्।",
+                3: "साधु।",
+                4: "उत्तमम्।",
+            }.get(rating, "")
+        is_german = language.startswith("de")
 
         # Check for custom phrases first
         custom_phrases = self._get_custom_phrases(rating, is_german)

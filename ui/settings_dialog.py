@@ -63,6 +63,7 @@ class SettingsDialog(QDialog):
     """Settings dialog for configuring Hands-Free Anki."""
 
     TTS_PROVIDER_CHOICES = [
+        ("sanskrit_local", "Local Sanskrit model (offline, Devanagari)"),
         ("elevenlabs", "ElevenLabs (studio neural, recommended)"),
         ("google_cloud", "Google Cloud TTS"),
         ("amazon_polly", "Amazon Polly"),
@@ -70,14 +71,12 @@ class SettingsDialog(QDialog):
         ("offline", "Offline pyttsx3")
     ]
     DEFAULT_TTS_PROVIDER_ORDER = [
-        "elevenlabs",
-        "google_cloud",
-        "amazon_polly",
-        "gtts",
+        "sanskrit_local",
         "offline",
     ]
 
     STT_PROVIDER_CHOICES = [
+        ("offline_whisper", "Local Whisper (offline, Sanskrit supported)"),
         ("elevenlabs", "ElevenLabs Scribe (online, recommended)"),
         ("whisper", "OpenAI Whisper Large V3 (online)"),
         ("google", "Google Speech Recognition (online)"),
@@ -773,6 +772,11 @@ class SettingsDialog(QDialog):
             "Speed for reading the answer/back of card")
         playback_layout.addRow("Back (answer) rate:", self.tts_back_rate)
 
+        self.sanskrit_timeout = QDoubleSpinBox()
+        self.sanskrit_timeout.setRange(30.0, 600.0)
+        self.sanskrit_timeout.setSuffix(" seconds")
+        playback_layout.addRow("Local Sanskrit TTS timeout:", self.sanskrit_timeout)
+
         self.tts_read_ease = QCheckBox("Announce card status before reading")
         self.tts_read_ease.setToolTip(
             "When enabled, announces the card type before reading the question.\n"
@@ -788,9 +792,8 @@ class SettingsDialog(QDialog):
             "Playback Preferences", playback_group))
 
         info_label = QLabel(
-            "ElevenLabs offers the highest naturalness. Google Cloud and Amazon Polly"
-            " provide neural voices with your own API keys. gTTS and offline pyttsx3"
-            " remain as fallbacks when premium services are unavailable."
+            "For Sanskrit, the local model is the only provider used; there is no Hindi,"
+            " English, or cloud fallback. Other languages may use their configured providers."
         )
         info_label.setWordWrap(True)
         tips_wrapper = QWidget()
@@ -1034,7 +1037,8 @@ class SettingsDialog(QDialog):
                                 self.stt_elevenlabs_model)
 
         stt_creds_note = QLabel(
-            "💡 Whisper requires an OpenAI API key. ElevenLabs can share the TTS key."
+            "Local Whisper uses the separately installed model and sends no audio off-device. "
+            "API credentials are used only by explicitly selected online providers."
         )
         stt_creds_note.setWordWrap(True)
         stt_creds_note.setStyleSheet("color: gray; font-size: 11px;")
@@ -1053,8 +1057,16 @@ class SettingsDialog(QDialog):
         stt_layout.addRow("Primary engine:", self.stt_primary_provider)
 
         self.stt_whisper_model = QLineEdit()
-        self.stt_whisper_model.setPlaceholderText("whisper-large-v3")
-        stt_layout.addRow("Whisper model:", self.stt_whisper_model)
+        self.stt_whisper_model.setPlaceholderText("large-v3")
+        stt_layout.addRow("Online Whisper model:", self.stt_whisper_model)
+
+        self.local_whisper_python = QLineEdit()
+        self.local_whisper_python.setToolTip("Isolated Python executable created by tools/setup_local_whisper.py")
+        stt_layout.addRow("Offline Whisper Python:", self.local_whisper_python)
+
+        self.local_whisper_model_path = QLineEdit()
+        self.local_whisper_model_path.setToolTip("Local model directory; reviews never download missing models")
+        stt_layout.addRow("Offline Whisper model directory:", self.local_whisper_model_path)
 
         self.stt_google_fallback = QCheckBox(
             "Enable Google Speech fallback when online")
@@ -1082,11 +1094,16 @@ class SettingsDialog(QDialog):
         self.stt_max_time.setSuffix(" seconds")
         stt_layout.addRow("Max recording time:", self.stt_max_time)
 
+        self.local_whisper_timeout = QDoubleSpinBox()
+        self.local_whisper_timeout.setRange(30.0, 600.0)
+        self.local_whisper_timeout.setSuffix(" seconds")
+        stt_layout.addRow("Local Whisper timeout:", self.local_whisper_timeout)
+
         layout.addWidget(self._wrap_section("Recognition Engine", stt_group))
 
         info_label = QLabel(
-            "Primary recognition now uses Whisper Large V3 with automatic fallbacks to"
-            " Google Speech and offline CMU Sphinx when enabled."
+            "Local Whisper runs with network access disabled and supports Sanskrit. "
+            "Google Speech and CMU Sphinx are not used for Sanskrit decks."
         )
         info_label.setWordWrap(True)
         info_wrapper = QWidget()
@@ -1820,6 +1837,7 @@ class SettingsDialog(QDialog):
         self.tts_rate.setValue(self.config.tts.rate)
         self.tts_front_rate.setValue(self.config.tts.front_rate)
         self.tts_back_rate.setValue(self.config.tts.back_rate)
+        self.sanskrit_timeout.setValue(self.config.tts.sanskrit_timeout)
         self.tts_read_ease.setChecked(self.config.tts.read_card_ease)
         # Use whichever ElevenLabs key is set (TTS or STT share the same key)
         elevenlabs_key = self.config.tts.elevenlabs_api_key or self.config.stt.elevenlabs_api_key
@@ -1851,6 +1869,8 @@ class SettingsDialog(QDialog):
         if stt_provider_idx >= 0:
             self.stt_primary_provider.setCurrentIndex(stt_provider_idx)
         self.stt_whisper_model.setText(self.config.stt.whisper_model)
+        self.local_whisper_python.setText(self.config.stt.local_whisper_python)
+        self.local_whisper_model_path.setText(self.config.stt.local_whisper_model_path)
         self.stt_google_fallback.setChecked(
             self.config.stt.enable_google_fallback)
         self.stt_sphinx_fallback.setChecked(
@@ -1858,6 +1878,7 @@ class SettingsDialog(QDialog):
         self.stt_silence_timeout.setValue(self.config.stt.silence_timeout)
         self.stt_min_time.setValue(self.config.stt.min_recording_time)
         self.stt_max_time.setValue(self.config.stt.max_recording_time)
+        self.local_whisper_timeout.setValue(self.config.stt.local_whisper_timeout)
         self.energy_threshold.setValue(self.config.stt.energy_threshold)
         self.dynamic_threshold.setChecked(self.config.stt.dynamic_threshold)
 
@@ -1979,6 +2000,7 @@ class SettingsDialog(QDialog):
         self.config.tts.rate = self.tts_rate.value()
         self.config.tts.front_rate = self.tts_front_rate.value()
         self.config.tts.back_rate = self.tts_back_rate.value()
+        self.config.tts.sanskrit_timeout = self.sanskrit_timeout.value()
         self.config.tts.read_card_ease = self.tts_read_ease.isChecked()
         self.config.tts.elevenlabs_api_key = self.elevenlabs_key.text().strip()
         # Get voice ID from combo box data or text (for custom IDs)
@@ -1999,7 +2021,9 @@ class SettingsDialog(QDialog):
 
         # STT
         self.config.stt.provider = self.stt_primary_provider.currentData()
-        self.config.stt.whisper_model = self.stt_whisper_model.text().strip() or "whisper-large-v3"
+        self.config.stt.whisper_model = self.stt_whisper_model.text().strip() or "large-v3"
+        self.config.stt.local_whisper_python = self.local_whisper_python.text().strip()
+        self.config.stt.local_whisper_model_path = self.local_whisper_model_path.text().strip()
         self.config.stt.enable_google_fallback = self.stt_google_fallback.isChecked()
         self.config.stt.enable_sphinx_fallback = self.stt_sphinx_fallback.isChecked()
         self.config.stt.silence_timeout = self.stt_silence_timeout.value()
@@ -2014,6 +2038,7 @@ class SettingsDialog(QDialog):
             self.config.llm.openai_api_key = openai_key
         self.config.stt.min_recording_time = self.stt_min_time.value()
         self.config.stt.max_recording_time = self.stt_max_time.value()
+        self.config.stt.local_whisper_timeout = self.local_whisper_timeout.value()
         self.config.stt.microphone_index = self.microphone_combo.currentData()
         self.config.stt.energy_threshold = self.energy_threshold.value()
         self.config.stt.dynamic_threshold = self.dynamic_threshold.isChecked()

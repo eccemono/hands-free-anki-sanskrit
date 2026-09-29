@@ -9,8 +9,7 @@
   },
   "tts": {
     "providers": [
-      "elevenlabs",
-      "gtts",
+      "sanskrit_local",
       "offline"
     ],
     "language": "en",
@@ -26,10 +25,14 @@
     "amazon_polly_access_key": "",
     "amazon_polly_secret_key": "",
     "amazon_polly_region": "us-east-1",
-    "amazon_polly_voice_id": "Joanna"
+    "amazon_polly_voice_id": "Joanna",
+    "sanskrit_runtime_root": "~/.local/share/Anki2/sanskrit-hindi-tts-runtime",
+    "sanskrit_runtime_python": "~/.local/share/Anki2/sanskrit-hindi-tts-runtime/venv/bin/python",
+    "sanskrit_runtime_worker": "~/.local/share/Anki2/addons21/sanskrit_hindi_tts/worker.py",
+    "sanskrit_timeout": 180
   },
   "stt": {
-    "provider": "whisper",
+    "provider": "offline_whisper",
     "language": "en-US",
     "silence_timeout": 1.5,
     "min_recording_time": 0.5,
@@ -37,11 +40,17 @@
     "microphone_index": null,
     "energy_threshold": 1000,
     "dynamic_threshold": true,
-    "whisper_model": "whisper-large-v3",
+    "whisper_model": "large-v3",
     "elevenlabs_api_key": "",
     "elevenlabs_model_id": "scribe_v1",
-    "enable_google_fallback": true,
-    "enable_sphinx_fallback": true
+    "enable_google_fallback": false,
+    "enable_sphinx_fallback": false,
+    "local_whisper_runtime_root": "~/.local/share/Anki2/hands-free-anki-runtime",
+    "local_whisper_python": "~/.local/share/Anki2/hands-free-anki-runtime/stt-venv/bin/python",
+    "local_whisper_model_path": "~/.local/share/Anki2/hands-free-anki-runtime/models/whisper-medium",
+    "local_whisper_device": "cuda",
+    "local_whisper_compute_type": "int8_float16",
+    "local_whisper_timeout": 180
   },
   "ocr": {
     "enabled": true,
@@ -85,10 +94,10 @@
     "openai_model": "text-embedding-3-small"
   },
   "voice_commands": {
-    "stop_words": "stop,halt,stopp,beenden",
-    "skip_words": "skip,überspringen",
-    "next_words": "next,weiter,nächste",
-    "disable_words": "disable,deaktivieren"
+    "stop_words": "stop,halt,stopp,beenden,विरम,विरम्य",
+    "skip_words": "skip,überspringen,त्यज",
+    "next_words": "next,weiter,nächste,अग्रे",
+    "disable_words": "disable,deaktivieren,निष्क्रिय"
   },
   "deck_settings": {
     "deck_settings": "{}",

@@ -13,9 +13,9 @@ from aqt import mw
 LLMProvider = Literal["openai", "anthropic", "ollama", "mistral", "none"]
 EmbeddingProvider = Literal["local", "spacy", "openai"]
 ScoringMethod = Literal["embedding", "llm", "hybrid"]
-TTSProvider = Literal["elevenlabs", "google_cloud",
+TTSProvider = Literal["sanskrit_local", "elevenlabs", "google_cloud",
                       "amazon_polly", "gtts", "offline"]
-STTProvider = Literal["elevenlabs", "whisper", "google", "sphinx"]
+STTProvider = Literal["offline_whisper", "elevenlabs", "whisper", "google", "sphinx"]
 
 
 @dataclass
@@ -23,10 +23,7 @@ class TTSConfig:
     """Text-to-Speech configuration."""
     providers: list[TTSProvider] = field(
         default_factory=lambda: [
-            "elevenlabs",
-            "google_cloud",
-            "amazon_polly",
-            "gtts",
+            "sanskrit_local",
             "offline",
         ]
     )
@@ -44,12 +41,16 @@ class TTSConfig:
     amazon_polly_secret_key: str = ""
     amazon_polly_region: str = "us-east-1"
     amazon_polly_voice_id: str = "Joanna"
+    sanskrit_runtime_root: str = "~/.local/share/Anki2/sanskrit-hindi-tts-runtime"
+    sanskrit_runtime_python: str = "~/.local/share/Anki2/sanskrit-hindi-tts-runtime/venv/bin/python"
+    sanskrit_runtime_worker: str = "~/.local/share/Anki2/addons21/sanskrit_hindi_tts/worker.py"
+    sanskrit_timeout: float = 180.0
 
 
 @dataclass
 class STTConfig:
     """Speech-to-Text configuration."""
-    provider: STTProvider = "whisper"
+    provider: STTProvider = "offline_whisper"
     language: str = "en-US"  # "en-US" or "de-DE"
     silence_timeout: float = 0.75  # Seconds of silence before stopping
     min_recording_time: float = 0.5  # Minimum recording duration
@@ -63,6 +64,12 @@ class STTConfig:
     elevenlabs_model_id: str = "scribe_v1"  # ElevenLabs STT model
     enable_google_fallback: bool = True
     enable_sphinx_fallback: bool = True
+    local_whisper_runtime_root: str = "~/.local/share/Anki2/hands-free-anki-runtime"
+    local_whisper_python: str = "~/.local/share/Anki2/hands-free-anki-runtime/stt-venv/bin/python"
+    local_whisper_model_path: str = "~/.local/share/Anki2/hands-free-anki-runtime/models/whisper-medium"
+    local_whisper_device: str = "cuda"
+    local_whisper_compute_type: str = "int8_float16"
+    local_whisper_timeout: float = 180.0
 
 
 @dataclass
@@ -158,10 +165,10 @@ class EmbeddingConfig:
 class VoiceCommandsConfig:
     """Voice commands configuration."""
     # Comma-separated words that trigger each command
-    stop_words: str = "stop,halt,stopp,beenden,aufhören,ende"
-    skip_words: str = "skip,überspringen,überspring,auslassen"
-    next_words: str = "next,weiter,nächste,nächstes,nächster"
-    disable_words: str = "disable,deaktivieren,ausschalten,off,aus"
+    stop_words: str = "stop,halt,stopp,beenden,aufhören,ende,विरम,विरम्य"
+    skip_words: str = "skip,überspringen,überspring,auslassen,त्यज"
+    next_words: str = "next,weiter,nächste,nächstes,nächster,अग्रे"
+    disable_words: str = "disable,deaktivieren,ausschalten,off,aus,निष्क्रिय"
 
 
 @dataclass
