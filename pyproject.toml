@@ -1,5 +1,5 @@
 [project]
-name = "hands-free-anki"
+name = "hands-free-anki-sanskrit"
 version = "0.1.0"
 description = "Hands-free Anki review using voice commands and TTS"
 readme = "README.md"
