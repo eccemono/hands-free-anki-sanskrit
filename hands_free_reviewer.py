@@ -13,6 +13,42 @@ from anki.hooks import wrap
 
 from .config import Config
 from .services import TTSService, STTService, OCRService, ScoringService
+from .services.answer_flow import (
+    AUTO_RATING,
+    OUTCOME_EXACT,
+    OUTCOME_UNCLEAR,
+    OUTCOME_WRONG,
+    classify_answer,
+    should_auto_rate,
+)
+
+
+def _clean_field_value(value: str) -> str:
+    """Remove sound tags and HTML from a note field, and collapse whitespace."""
+    import re
+
+    if not value:
+        return ""
+    value = re.sub(r'\[sound:[^\]]+\]', '', value)
+    value = re.sub(r'<[^>]+>', ' ', value)
+    return re.sub(r'\s+', ' ', value).strip()
+
+
+def _normalize_spoken_text(text: str) -> str:
+    """Lower-case spoken text and drop punctuation, keeping letters and marks.
+
+    Combining marks are kept because Devanagari vowel signs are marks, not
+    letters; dropping them would turn "द्वे" into "दव".
+    """
+    import re
+    import unicodedata
+
+    kept = [
+        char for char in text.lower()
+        if char.isalnum() or char == "_" or char.isspace()
+        or unicodedata.category(char).startswith("M")
+    ]
+    return re.sub(r'\s+', ' ', "".join(kept)).strip()
 
 
 class HandsFreeReviewer:
@@ -373,17 +409,14 @@ class HandsFreeReviewer:
                     f"Manual rating detected: {voice_rating}", "info")
                 self._show_rating_indicator(voice_rating)
 
-                # Read the correct answer so they can learn
-                if voice_rating < 3 and self._back_text:
-                    answer_prefix = self._get_localized_prompt("answer_was")
-                    self.tts.set_rate(self.config.tts.back_rate)
-                    self.tts.speak(
-                        f"{answer_prefix} {self._back_text}", blocking=True)
+                # Always read the final answer so the learner hears it
+                self._speak_final_answer()
 
                 self._apply_rating(voice_rating)
 
             elif user_answer:
                 try:
+                    graded_status = ""
                     if self.tts._is_sanskrit_language(self._current_language):
                         from .services.sanskrit_grading import grade_sanskrit_answer
 
@@ -398,6 +431,7 @@ class HandsFreeReviewer:
                             return
                         score = result.score or 0.0
                         rating = result.rating or 1
+                        graded_status = result.status
                     else:
                         self.debug_log(
                             f"Scoring answer with method: {self.config.scoring.method}", "scoring")
@@ -415,26 +449,22 @@ class HandsFreeReviewer:
                     self._skip_card()
                     return
 
-                # Announce result (if enabled)
-                if self.config.announcement.enabled:
-                    result_text = self._get_rating_announcement(rating)
-                    if result_text:  # Only speak if there's something to say
-                        self.tts.speak(result_text, blocking=True)
+                if graded_status:
+                    outcome = classify_answer(
+                        user_answer, self._expected_answer_text(note), graded_status)
+                else:
+                    outcome = (
+                        OUTCOME_EXACT if rating >= AUTO_RATING else OUTCOME_WRONG)
 
-                # Show visual indicator
-                self._show_rating_indicator(rating)
-
-                # Also read the correct answer if wrong
-                if rating < 3 and self._back_text:
-                    answer_prefix = self._get_localized_prompt("answer_was")
-                    self.tts.set_rate(self.config.tts.back_rate)
-                    self.tts.speak(
-                        f"{answer_prefix} {self._back_text}", blocking=True)
-
-                # Apply rating
-                self._apply_rating(rating)
+                if should_auto_rate(outcome):
+                    # Announce the applied result, then read the answer, then rate.
+                    if self.config.announcement.enabled:
+                        result_text = self._get_rating_announcement(AUTO_RATING)
+                        if result_text:
+                            self.tts.speak(result_text, blocking=True)
+                self._finish_answer_attempt(outcome)
             else:
-                self._manual_rate_current_card()
+                self._finish_answer_attempt(OUTCOME_UNCLEAR)
 
         except Exception as e:
             from .utils.logger import log_exception
@@ -447,16 +477,35 @@ class HandsFreeReviewer:
             except Exception as e2:
                 log_exception(e2, "_process_question - error recovery")
 
-    def _manual_rate_current_card(self) -> None:
-        """Show the answer and accept a spoken Anki rating without semantic grading."""
+    def _expected_answer_text(self, note) -> str:
+        """Canonical final answer: the primary answer field, else the card back text."""
+        field_names = list(note.keys())
+        field_values = list(note.fields)
+        for name in ("Answer-Devanagari", "Answer-IAST", "Answer-ISO15919"):
+            if name in field_names:
+                value = _clean_field_value(field_values[field_names.index(name)])
+                if value:
+                    return value
+        return self._back_text
+
+    def _speak_final_answer(self) -> bool:
+        """Speak the canonical final answer. Returns whether anything was spoken."""
+        if not self._back_text:
+            return False
+        answer_prefix = self._get_localized_prompt("answer_was")
+        self.tts.set_rate(self.config.tts.back_rate)
+        self.tts.speak(f"{answer_prefix} {self._back_text}", blocking=True)
+        return True
+
+    def _reveal_answer(self) -> None:
+        """Reveal the answer side of the card in the UI."""
         import time
 
         mw.taskman.run_on_main(self._show_answer)
         time.sleep(0.5)
-        if self._back_text:
-            answer_prefix = self._get_localized_prompt("answer_was")
-            self.tts.set_rate(self.config.tts.back_rate)
-            self.tts.speak(f"{answer_prefix} {self._back_text}", blocking=True)
+
+    def _request_rating(self) -> None:
+        """Ask for a spoken Anki rating and apply it, or skip when nothing is heard."""
         self.tts.speak(self._get_localized_prompt("say_rating_or_skip"), blocking=True)
         rating_response = self.stt.listen_and_recognize(
             on_recording_start=self._on_recording_start,
@@ -476,6 +525,31 @@ class HandsFreeReviewer:
             self.tts.speak(self._get_localized_prompt("skipping"), blocking=True)
             self._skip_card()
 
+    def _finish_answer_attempt(self, outcome: str) -> None:
+        """Read the final answer, then auto-rate only a clearly exact answer.
+
+        Every outcome speaks the canonical answer first. Only ``exact`` is graded
+        automatically (Good); near-match, unclear, and wrong answers are never
+        auto-rated and fall back to the spoken/manual rating prompt.
+        """
+        self.debug_log(f"Answer outcome: {outcome}", "scoring")
+        if not should_auto_rate(outcome):
+            self._reveal_answer()
+        if outcome == OUTCOME_UNCLEAR:
+            self.tts.speak(self._get_localized_prompt("didnt_catch"), blocking=True)
+        self._speak_final_answer()
+        if should_auto_rate(outcome):
+            self._show_rating_indicator(AUTO_RATING)
+            self._apply_rating(AUTO_RATING)
+            return
+        self._request_rating()
+
+    def _manual_rate_current_card(self) -> None:
+        """Show the answer and accept a spoken Anki rating without semantic grading."""
+        self._reveal_answer()
+        self._speak_final_answer()
+        self._request_rating()
+
     def _extract_card_text(self, card: Card, note, include_fields: list[str] | None = None) -> tuple[str, str]:
         """
         Extract front and back text from card using note fields.
@@ -488,8 +562,6 @@ class HandsFreeReviewer:
                            If set, only these fields are read.
                            If None/empty, uses default skip list.
         """
-        import re
-
         field_names = list(note.keys())
         field_values = list(note.fields)
 
@@ -509,23 +581,11 @@ class HandsFreeReviewer:
             # Otherwise, include unless in default skip list
             return name_lower not in default_skip
 
-        def clean_field_value(value: str) -> str:
-            """Clean field value - remove sound tags, HTML, etc."""
-            if not value:
-                return ""
-            # Remove [sound:...] tags
-            value = re.sub(r'\[sound:[^\]]+\]', '', value)
-            # Remove HTML tags
-            value = re.sub(r'<[^>]+>', ' ', value)
-            # Clean up whitespace
-            value = re.sub(r'\s+', ' ', value).strip()
-            return value
-
         # Build text from filtered fields
         filtered_texts = []
         for name, value in zip(field_names, field_values):
             if should_include_field(name):
-                cleaned = clean_field_value(value)
+                cleaned = _clean_field_value(value)
                 if cleaned:
                     filtered_texts.append(cleaned)
 
@@ -543,7 +603,7 @@ class HandsFreeReviewer:
         for name, value in zip(field_names, field_values):
             if not should_include_field(name):
                 continue
-            cleaned = clean_field_value(value)
+            cleaned = _clean_field_value(value)
             if not cleaned:
                 continue
             # Check if field is referenced in templates
@@ -921,8 +981,7 @@ class HandsFreeReviewer:
         if not text:
             return None
 
-        import re
-        text = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+        text = _normalize_spoken_text(text)
 
         # Direct number matches
         rating_map = {
@@ -968,8 +1027,7 @@ class HandsFreeReviewer:
         if not text:
             return None
 
-        import re
-        text = re.sub(r"[^\w\s]", " ", text.lower()).strip()
+        text = _normalize_spoken_text(text)
         words = set(text.split())
 
         # Get configurable word lists from config
