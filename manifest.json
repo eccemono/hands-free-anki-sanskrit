@@ -1,13 +1,13 @@
 {
     "name": "Hands-Free Anki",
-    "package": "hands-free-anki",
+    "package": "hands_free_anki_sanskrit",
     "mod": 1738886400,
     "min_point_version": 54,
     "max_point_version": 231,
     "branch_index": 0,
     "conflicts": [],
-    "homepage": "https://github.com/fsch-ppi/hands-free-anki",
+    "homepage": "https://github.com/eccemono/hands-free-anki-sanskrit",
     "author": "Florian Schlösser",
-    "description": "Review Anki cards hands-free using voice. Cards are read aloud, you answer verbally, and answers are automatically scored.",
+    "description": "Sanskrit-oriented hands-free Anki reviews with voice and TTS.",
     "tags": ["voice", "hands-free", "accessibility", "tts", "speech-recognition", "ai-scoring"]
 }

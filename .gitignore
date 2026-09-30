@@ -12,6 +12,20 @@ __pycache__/
 
 # User configuration (contains API keys!)
 user_config.json
+*.anki2
+*.anki2-wal
+*.anki2-shm
+collection.media/
+*.ankiaddon
+venv/
+.venv/
+models/
+audio/
+*.wav
+*.mp3
+.env
+.env.*
+.cache/
 
 # Cache and logs
 cache/

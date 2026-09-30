@@ -1,4 +1,9 @@
-# Hands-Free Anki
+# Hands-Free Anki Sanskrit
+
+This fork keeps the upstream add-on's original MIT license and targets Anki
+26.09.3. Its Anki package/module identity is `hands_free_anki_sanskrit` (the
+repository name is hyphenated, but the installed add-on folder must be a valid
+Python package name).
 
 🎤 **Review Anki cards completely hands-free using voice!**
 
@@ -85,12 +90,16 @@ During review, you can say:
 
 If you want to build/install the addon yourself:
 
-### 1. Clone the repository
+### 1. Clone the fork into Anki's add-on folder
 ```bash
 cd ~/.local/share/Anki2/addons21/
-git clone https://github.com/fsch-ppi/hands-free-anki.git
-cd hands-free-anki
+git clone https://github.com/eccemono/hands-free-anki-sanskrit.git hands_free_anki_sanskrit
+cd hands_free_anki_sanskrit
 ```
+
+Prefer installing from the fork's source using the package folder shown above.
+The fork uses an underscore package ID in `manifest.json`, separate from the
+hyphenated GitHub repository name.
 
 ### 2. Install Python dependencies
 ```bash
