@@ -1,4 +1,5 @@
 import importlib
+import json
 import sys
 import types
 import unittest
@@ -70,6 +71,24 @@ class SanskritGradingTests(unittest.TestCase):
     def test_card_can_force_manual_mode(self):
         fields = dict(self.fields, **{"Grading Mode": "manual"})
         self.assertEqual(grade_sanskrit_answer(fields, "रामः", "strict").status, "manual")
+
+    def test_source_controlled_validation_fixture(self):
+        fixture_path = ROOT / "tests/fixtures/sanskrit-validation.json"
+        fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+        cases = {case["id"]: case for case in fixture["cases"]}
+
+        cross_script = cases["cross-script-rama-visarga"]
+        self.assertEqual(
+            normalize_sanskrit(cross_script["Answer-Devanagari"]),
+            normalize_sanskrit(cross_script["Answer-IAST"]),
+        )
+        sandhi = cases["listed-sandhi-variant"]
+        self.assertEqual(
+            grade_sanskrit_answer(sandhi, sandhi["spoken_variant"], sandhi["grading_mode"]).status,
+            "correct",
+        )
+        manual = cases["translation-manual"]
+        self.assertEqual(grade_sanskrit_answer(manual, "rāmaḥ").status, "manual")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,216 @@
+# Offline Sanskrit speech on Linux Mint
+
+## What stays local
+
+The Sanskrit deck preset routes card speech to the installed Sanskrit model and
+routes recognition to the local Faster-Whisper model with language `sa`. For
+Sanskrit, failure is explicit: there is no Hindi gTTS, Google, cloud Whisper,
+English, or other voice fallback. Review audio is not uploaded. The one-time
+runtime setup below downloads packages and model assets; it is not run while
+reviewing. API providers remain in the add-on for other languages, but are not
+selected by the Sanskrit route.
+
+Local transcription is set to Faster-Whisper `medium` with `int8_float16` on a
+CUDA GPU. The installed runtime uses NVIDIA CUDA 12 cuBLAS/cuDNN wheels and a
+local model directory (about 1.5 GB for the model). The RTX 4070 Ti is supported;
+if GPU memory is occupied, free memory before starting a review or expect a
+visible inference error rather than a cloud fallback.
+
+## Install / set up
+
+1. Install the add-on from the [public fork](https://github.com/eccemono/hands-free-anki-sanskrit). For a source checkout, the Anki
+   module folder must be `hands_free_anki_sanskrit` (the GitHub repo is
+   hyphenated). Restart Anki after copying the add-on.
+2. Keep the separate local Sanskrit/Hindi TTS add-on and its model runtime at
+   the configured defaults:
+   `~/.local/share/Anki2/addons21/sanskrit_hindi_tts/worker.py` and
+   `~/.local/share/Anki2/sanskrit-hindi-tts-runtime/`. This fork invokes only
+   its Sanskrit model API and bypasses that add-on's Hindi online fallback.
+3. From the fork checkout or installed add-on folder, run the setup command
+   once in a terminal:
+
+   ```bash
+   python3.12 tools/setup_local_whisper.py
+   ```
+
+   It creates an isolated environment at
+   `~/.local/share/Anki2/hands-free-anki-runtime/stt-venv`, installs
+   Faster-Whisper, PyAV (pinned below 17 for its audio decoder API), CUDA
+   libraries, and downloads the `Systran/faster-whisper-medium` model to
+   `~/.local/share/Anki2/hands-free-anki-runtime/models/whisper-medium`.
+   The script validates that CUDA can load the model. Internet access is needed
+   only for this explicit setup operation.
+4. In **Tools → Hands-Free Anki → Settings → Per-Deck Settings**, add your deck,
+   select **Apply Sanskrit deck preset**, and save. Confirm the microphone in
+   **Settings → Speech Recognition**. The preset sets `sa-IN`; transcription
+   passes `sa` to Whisper.
+5. Run a small due-card review first. The initial model load may take time.
+
+The current Linux Mint profile already contains the separate Sanskrit TTS
+runtime and local TTS model. Faster-Whisper medium is installed in the separate
+runtime above. Whisper interpreter/model paths and its timeout are available in
+Speech Recognition settings. The Sanskrit TTS runtime paths can be changed in
+`user_config.json` if your local TTS installation uses another location; the
+Sanskrit synthesis timeout is in TTS settings.
+
+## Card study patterns
+
+Use the field definitions and templates in [sanskrit-deck.md](sanskrit-deck.md).
+
+- **Vocabulary**: Prompt on the front; canonical Devanagari answer on the back.
+  Use `strict` for one expected form or `accepted` for variants you have checked.
+- **Grammar production**: cue the lemma, case/number/person, or required form;
+  put the exact target in the three answer script fields. Keep short/long
+  vowels, aspirates, and retroflexes significant unless the card explicitly
+  permits another form.
+- **Script practice**: show one script in the prompt and store the canonical
+  response in Devanagari, IAST, and ISO 15919. The grader compares across
+  scripts without rewriting the note.
+- **Translation**: label the note `Exercise Type=translation`; it will always
+  ask for a manual Anki rating. No offline semantic-translation score is
+  claimed.
+- **Recitation/open response**: label `Exercise Type=recitation` or `open-ended`
+  and rate manually. Use pre-recorded audio or your own listening judgment for
+  meter, accent, and pronunciation nuance.
+
+Use `Accepted answers` only for verified alternatives, such as a specific
+sandhi form. Separate alternatives by line, `<br>`, `|`, or `;`. Manual rating
+can also be selected for a whole deck or an individual note. If answer fields
+are missing, the grader safely falls back to manual rating.
+
+## Privacy and recovery
+
+- Model files and the venv live outside the add-on source folder and are
+  ignored by Git. Do not copy your `User 1` profile or collection into a test
+  checkout.
+- Review workers set Hugging Face/Transformers offline flags and require a
+  local model path. Missing assets and timeouts are surfaced; they do not
+  trigger model downloads during review.
+- If TTS fails, verify the local Sanskrit runtime path and cached Sanskrit
+  model. If STT fails, verify the runtime Python, model directory, available
+  GPU memory, and selected microphone. Re-run the one-time setup script only
+  when deliberately installing/updating local assets.
+- You can use keyboard ratings if the microphone or local speech model is not
+  ready. Restarting Anki after changing add-on files/configuration is advised.
+
+## Validation record
+
+Environment: Linux Mint, Anki 26.09.3, NVIDIA GeForce RTX 4070 Ti. Disposable
+profiles under `/tmp/opencode/` were used; the real `User 1` profile and
+collection were not opened or modified. Anki safe mode was off. Startup reached
+the main loop and the add-on log recorded `Hands-Free Anki addon loaded` without
+bundled speech dependencies.
+
+In the local-speech profile, `TTSService.speak()` on `sa-IN` synthesized and
+played a Sanskrit WAV through PulseAudio with the `sanskrit_local`-only provider
+chain. An initial ALSA device error was visible and did not trigger fallback;
+selecting the running PulseAudio server allowed playback to succeed. The same
+profile passed 10.1 seconds of real EMEET microphone capture to the local CUDA
+Whisper worker with `sa-IN`, even with Google and Sphinx fallback flags enabled;
+the observed chain contained only `offline_whisper`. It returned non-empty
+English text from ambient speech, not a known Sanskrit utterance. Sanskrit
+recognition accuracy on a spoken Sanskrit sample is therefore not established.
+
+Strict cross-script grading returned correct for IAST/Devanagari-equivalent
+`rāmaḥ`/`रामः` and incorrect for an unlisted `नरो` variant. Accepted mode matched
+the explicitly listed `नरो`. A translation note returned manual mode, and the
+actual `HandsFreeReviewer._process_question()` / `_manual_rate_current_card()`
+path requested and applied a test rating of 3 using isolated test doubles for
+speech input and the Anki rating callback; no semantic translation score was
+used. These checks ran inside the disposable Anki process against its loaded
+add-on.
+
+On a later combined profile run, local TTS and all grading checks passed, but
+the Whisper worker could not load because CUDA reported out of memory (about
+3.7 GB was free while another process held about 6.8 GB). The earlier local
+speech profile run did successfully load the same local medium CUDA model and
+process real microphone audio. This transient memory-limited rerun is recorded
+as a failure, not a pass. The source fixture contains synthetic text cases only;
+it has no user collection data or generated audio.
+
+### Known-audio local Whisper check
+
+On 2026-09-29, two supplied FLAC recordings were decoded in memory and passed
+through `STTService._recognize_audio()` in a fresh disposable Anki profile. The
+service used Faster-Whisper `medium` on CUDA with `int8_float16`, configured
+language `sa-IN` (the worker receives `sa`), and the observed provider chain was
+only `offline_whisper`, with Hugging Face/Transformers offline flags set. The
+GPU had 10,841 MiB free before inference and 9,662 MiB free while the local
+worker used 1,172 MiB.
+
+For the Sanskrit phrase, local Whisper returned `नमस्ते, रामह पत्थति`. After
+ignoring punctuation and spaces, this is `नमस्तेरामहपत्थति`, not the expected
+`नमस्तेरामःपठति`: the visarga and aspirated consonant were not recognized
+correctly. Therefore **known-Sanskrit recognition did not pass**, despite the
+worker completing successfully. The second recording returned `3`, which
+`HandsFreeReviewer._parse_voice_rating()` resolved to rating 3. The rating
+check passed. The supplied recordings were read-only inputs; no audio copies
+were placed in the repository or committed. Do not treat this single local
+recognition result as a Sanskrit-accuracy pass; a general recognition
+improvement and another known-audio validation are needed before merging the
+stack under the current validation gate.
+
+### Revised known-audio check: exact comparison and near-match decision
+
+On 2026-09-30 the same two recordings were replayed through the real local path
+in a fresh disposable Anki profile after the uncertain-answer flow was
+implemented. `STTService._recognize_audio()` selected a provider chain of
+`['offline_whisper']` only and called the local worker with
+`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, model
+`~/.local/share/Anki2/hands-free-anki-runtime/models/whisper-medium`,
+`device=cuda`, `compute_type=int8_float16`, and language `sa` (from the `sa-IN`
+preset). Google and Sphinx fallback flags were left enabled and were never
+invoked. A separate probe using the same interpreter, model, and compute type
+confirmed one CUDA device through ctranslate2 4.8.2, `int8_float16` among the
+supported CUDA compute types, 2,330 MiB in use before model load and 3,457 MiB
+after, a 0.31 s transcription, and automatic language detection of `sa` with
+probability 1.0. Its transcript was identical to the add-on transcript.
+
+The Sanskrit recording again returned `नमस्ते, रामह पत्थति`. Normalized, the
+expected phrase is `namaste rāmaḥ paṭhati` and the recognized phrase is
+`namaste rāmaha patthati`. This is **still not an exact canonical
+transcription**; the earlier exact-only failure above remains accurate as
+historical evidence.
+
+A Sanskrit-aware near-match decision is now reported alongside that comparison.
+It requires the same number of words in the same order, compares normalized
+syllable units, and accepts only the documented consonant variants `ḥ`/`ha` and
+`ṭh`/`tth`, with at most one variant unit per word and a minimum similarity of
+0.6. For this recording the decision is a near match at similarity 0.8889, with
+every non-exact difference listed: `rāmaḥ: ḥ ↔ ha` and
+`paṭhati: ṭha ↔ ttha`. The rating recording again returned `3` and
+`HandsFreeReviewer._parse_voice_rating()` resolved it to rating 3.
+
+The near match is a validation diagnostic only. On a real card in the
+disposable collection, strict grading of the same transcript still returned
+`incorrect` while the canonical phrase returned `correct`, and the near-match
+outcome never applies a rating by itself.
+
+Review outcomes were exercised against the real
+`HandsFreeReviewer._finish_answer_attempt()` in the same profile, with isolated
+doubles for TTS, speech input, and the Anki rating callback:
+
+| Outcome | Behaviour observed |
+| --- | --- |
+| `exact` | Speaks `उत्तरम् आसीत्: नमस्ते रामः पठति`, then applies Good (3) automatically |
+| `near_match` | Reveals the answer, speaks the final answer, asks for a rating, applies the spoken rating |
+| `unclear` | States that nothing was heard, reveals and speaks the final answer, asks for a rating, applies the spoken rating |
+| `wrong` | Reveals the answer, speaks the final answer, asks for a rating, applies the spoken rating |
+
+Only the exact outcome auto-rated. The other three revealed the answer, spoke
+it, prompted `एकम्, द्वे, त्रीणि, चत्वारि वा वदतु; मौने कार्डं त्यजतु।`, listened,
+and applied the requested rating. No non-exact outcome applied a grade on its
+own.
+
+#### Runtime dependency note for Anki 26
+
+This run also exposed an install-time issue unrelated to the answer flow.
+Anki 26.09.3 bundles CPython 3.13, which no longer ships `audioop` or `aifc`,
+and SpeechRecognition imports both at module scope. In the disposable profile
+the offline path was made to run by placing the `audioop-lts` backport and a
+minimal `aifc` stub in the add-on `vendor` directory; the audio itself is
+16 kHz PCM, so no AIFF decoding is involved. A real installation on Anki 26
+without those modules fails inside `STTService._recognize_audio()` with
+`ModuleNotFoundError: No module named 'audioop'` rather than falling back to a
+cloud provider. If you see that error, check the add-on `vendor` directory
+before re-running the setup script.
