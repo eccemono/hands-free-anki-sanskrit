@@ -43,6 +43,15 @@ brew install portaudio tesseract espeak
 # Install Tesseract from: https://github.com/UB-Mannheim/tesseract/wiki
 ```
 
+### Offline Sanskrit speech
+
+For local Sanskrit Whisper STT, run `python3.12 tools/setup_local_whisper.py`
+once from the source checkout. It creates an isolated runtime under
+`~/.local/share/Anki2/hands-free-anki-runtime/` and downloads the configured
+model. This setup needs internet access; Sanskrit review uses the local model
+and does not fall back to a cloud recognizer. See `tools/setup_local_whisper.py`
+for the runtime, model, and compute-type options.
+
 ## ⚙️ Configuration
 
 Access settings via **Tools → Hands-Free → Settings**
