@@ -211,6 +211,7 @@ class SettingsDialog(QDialog):
         self.language_combo.addItem("German (Deutsch)", "de")
         self.language_combo.addItem("French (Français)", "fr")
         self.language_combo.addItem("Spanish (Español)", "es")
+        self.language_combo.addItem("Sanskrit (sa-IN)", "sa-IN")
         lang_layout.addRow("Default language:", self.language_combo)
 
         lang_note = QLabel("<i>This affects TTS voice and prompts. Override per-deck in Deck Settings.</i>")
@@ -254,16 +255,16 @@ class SettingsDialog(QDialog):
         deck_settings_layout = QVBoxLayout(deck_settings_group)
 
         deck_settings_info = QLabel(
-            "Configure language and which fields to read for each deck."
+            "Configure language, fields to read, and Sanskrit strict/accepted/manual grading per deck."
         )
         deck_settings_info.setWordWrap(True)
         deck_settings_layout.addWidget(deck_settings_info)
 
         # Table for deck settings
         self.deck_settings_table = QTableWidget()
-        self.deck_settings_table.setColumnCount(3)
+        self.deck_settings_table.setColumnCount(4)
         self.deck_settings_table.setHorizontalHeaderLabels(
-            ["Deck Name", "Language", "Fields to Read"])
+            ["Deck Name", "Language", "Fields to Read", "Sanskrit Grading"])
         self.deck_settings_table.horizontalHeader().setStretchLastSection(True)
         self.deck_settings_table.setMaximumHeight(150)
         self.deck_settings_table.setSelectionBehavior(
@@ -379,6 +380,7 @@ class SettingsDialog(QDialog):
             ("(Use default)", ""),
             ("English", "en"),
             ("German", "de"),
+            ("Sanskrit (sa-IN)", "sa-IN"),
             ("French", "fr"),
             ("Spanish", "es"),
             ("Italian", "it"),
@@ -395,6 +397,13 @@ class SettingsDialog(QDialog):
             lang_combo.addItem(name, code)
         form.addRow("Language:", lang_combo)
 
+        grading_combo = QComboBox()
+        grading_combo.addItem("Use strict default", "")
+        grading_combo.addItem("Strict exact match", "strict")
+        grading_combo.addItem("Accept listed variants", "accepted")
+        grading_combo.addItem("Manual rating", "manual")
+        form.addRow("Sanskrit grading:", grading_combo)
+
         layout.addLayout(form)
 
         # Fields section
@@ -410,6 +419,9 @@ class SettingsDialog(QDialog):
         fields_scroll.setWidget(fields_widget)
 
         field_checkboxes = []
+
+        sanskrit_preset_btn = QPushButton("Apply Sanskrit deck preset")
+        layout.addWidget(sanskrit_preset_btn)
 
         def populate_fields(deck_name: str):
             """Populate field checkboxes for the selected deck."""
@@ -432,6 +444,20 @@ class SettingsDialog(QDialog):
                 fields_layout.addWidget(cb)
                 field_checkboxes.append(cb)
 
+        def apply_sanskrit_preset():
+            idx = lang_combo.findData("sa-IN")
+            if idx >= 0:
+                lang_combo.setCurrentIndex(idx)
+            grading_idx = grading_combo.findData("strict")
+            if grading_idx >= 0:
+                grading_combo.setCurrentIndex(grading_idx)
+            voice_fields = {"prompt", "answer-devanagari"}
+            for checkbox in field_checkboxes:
+                if isinstance(checkbox, QCheckBox):
+                    checkbox.setChecked(checkbox.text().strip().casefold() in voice_fields)
+
+        sanskrit_preset_btn.clicked.connect(apply_sanskrit_preset)
+
         # Connect deck change to field population
         deck_combo.currentTextChanged.connect(populate_fields)
 
@@ -444,10 +470,15 @@ class SettingsDialog(QDialog):
             if edit_row >= 0:
                 lang_item = self.deck_settings_table.item(edit_row, 1)
                 fields_item = self.deck_settings_table.item(edit_row, 2)
+                grading_item = self.deck_settings_table.item(edit_row, 3)
                 if lang_item:
                     idx = lang_combo.findData(lang_item.text())
                     if idx >= 0:
                         lang_combo.setCurrentIndex(idx)
+                if grading_item:
+                    idx = grading_combo.findData(grading_item.text())
+                    if idx >= 0:
+                        grading_combo.setCurrentIndex(idx)
                 if fields_item and fields_item.text():
                     selected_fields = [f.strip()
                                        for f in fields_item.text().split(",")]
@@ -491,6 +522,8 @@ class SettingsDialog(QDialog):
                 row, 1, QTableWidgetItem(lang_code))
             self.deck_settings_table.setItem(
                 row, 2, QTableWidgetItem(", ".join(selected_fields)))
+            self.deck_settings_table.setItem(
+                row, 3, QTableWidgetItem(grading_combo.currentData() or ""))
             dialog.accept()
 
         ok_btn.clicked.connect(accept)
@@ -1829,6 +1862,8 @@ class SettingsDialog(QDialog):
                 row, 1, QTableWidgetItem(settings.language))
             self.deck_settings_table.setItem(
                 row, 2, QTableWidgetItem(", ".join(settings.include_fields)))
+            self.deck_settings_table.setItem(
+                row, 3, QTableWidgetItem(settings.grading_mode))
         self.default_skip_fields.setText(
             self.config.deck_settings.default_skip_fields)
 
@@ -1960,7 +1995,7 @@ class SettingsDialog(QDialog):
         # General / Language
         lang = self.language_combo.currentData()
         self.config.tts.language = lang
-        self.config.stt.language = "de-DE" if lang == "de" else "en-US"
+        self.config.stt.language = "de-DE" if lang == "de" else "sa-IN" if lang.startswith("sa") else "en-US"
 
         # Display settings
         self.config.display.show_user_answer = self.show_user_answer.isChecked()
@@ -1982,6 +2017,7 @@ class SettingsDialog(QDialog):
             deck_item = self.deck_settings_table.item(row, 0)
             lang_item = self.deck_settings_table.item(row, 1)
             fields_item = self.deck_settings_table.item(row, 2)
+            grading_item = self.deck_settings_table.item(row, 3)
             if deck_item:
                 deck_name = deck_item.text()
                 language = lang_item.text() if lang_item else ""
@@ -1990,7 +2026,8 @@ class SettingsDialog(QDialog):
                                   for f in fields_str.split(",") if f.strip()]
                 deck_settings[deck_name] = {
                     "language": language,
-                    "include_fields": include_fields
+                    "include_fields": include_fields,
+                    "grading_mode": grading_item.text() if grading_item else "",
                 }
         self.config.deck_settings.deck_settings = json.dumps(deck_settings)
         self.config.deck_settings.default_skip_fields = self.default_skip_fields.text().strip()

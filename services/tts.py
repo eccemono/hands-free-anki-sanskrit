@@ -16,6 +16,7 @@ import requests
 
 from ..config import TTSConfig
 from .language_policy import is_sanskrit_language, tts_provider_chain
+from .sanskrit import to_devanagari
 
 
 class TTSService:
@@ -189,7 +190,7 @@ class TTSService:
     def _speak_sanskrit_local(self, text: str, blocking: bool) -> bool:
         if not self._is_sanskrit_language(self._current_language):
             return False
-        output = self._request_sanskrit_tts(text)
+        output = self._request_sanskrit_tts(to_devanagari(text))
         try:
             return self._play_audio_file(str(output), blocking)
         finally:

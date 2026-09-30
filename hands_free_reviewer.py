@@ -383,15 +383,29 @@ class HandsFreeReviewer:
                 self._apply_rating(voice_rating)
 
             elif user_answer:
-                # Score the answer
-                self.debug_log(
-                    f"Scoring answer with method: {self.config.scoring.method}", "scoring")
                 try:
-                    score, rating = self.scoring.score_answer(
-                        user_answer,
-                        self._back_text,
-                        self._front_text
-                    )
+                    if self.tts._is_sanskrit_language(self._current_language):
+                        from .services.sanskrit_grading import grade_sanskrit_answer
+
+                        note_fields = dict(zip(note.keys(), note.fields))
+                        deck_mode = self.config.deck_settings.get_grading_mode_for_deck(
+                            deck_name
+                        ) or "strict"
+                        result = grade_sanskrit_answer(note_fields, user_answer, deck_mode)
+                        if result.status == "manual":
+                            self.debug_log("Manual Sanskrit rating required", "scoring")
+                            self._manual_rate_current_card()
+                            return
+                        score = result.score or 0.0
+                        rating = result.rating or 1
+                    else:
+                        self.debug_log(
+                            f"Scoring answer with method: {self.config.scoring.method}", "scoring")
+                        score, rating = self.scoring.score_answer(
+                            user_answer,
+                            self._back_text,
+                            self._front_text
+                        )
                     self.debug_log(
                         f"Score: {score:.2f} → Rating: {rating}", "scoring")
                 except Exception as e:
@@ -420,47 +434,7 @@ class HandsFreeReviewer:
                 # Apply rating
                 self._apply_rating(rating)
             else:
-                # No answer detected - show answer first, then prompt for rating
-                mw.taskman.run_on_main(self._show_answer)
-
-                # Brief pause to let user see the answer
-                import time
-                time.sleep(0.5)
-
-                # Read the correct answer
-                if self._back_text:
-                    answer_prefix = self._get_localized_prompt("answer_was")
-                    self.tts.set_rate(self.config.tts.back_rate)
-                    self.tts.speak(
-                        f"{answer_prefix} {self._back_text}", blocking=True)
-
-                # Now prompt for rating
-                self.tts.speak(self._get_localized_prompt(
-                    "say_rating_or_skip"), blocking=True)
-
-                # Listen for rating
-                rating_response = self.stt.listen_and_recognize(
-                    on_recording_start=self._on_recording_start,
-                    on_recording_end=self._on_recording_end,
-                )
-
-                # Show what was recognized (debug)
-                self._show_recognized_text(rating_response)
-
-                if not self.is_active:
-                    return
-
-                voice_rating = self._parse_voice_rating(
-                    rating_response) if rating_response else None
-
-                if voice_rating:
-                    self._show_rating_indicator(voice_rating)
-                    self._apply_rating_after_answer(voice_rating)
-                else:
-                    # Still no rating - skip this card
-                    self.tts.speak(self._get_localized_prompt(
-                        "skipping"), blocking=True)
-                    self._skip_card()
+                self._manual_rate_current_card()
 
         except Exception as e:
             from .utils.logger import log_exception
@@ -472,6 +446,35 @@ class HandsFreeReviewer:
                 self._skip_card()
             except Exception as e2:
                 log_exception(e2, "_process_question - error recovery")
+
+    def _manual_rate_current_card(self) -> None:
+        """Show the answer and accept a spoken Anki rating without semantic grading."""
+        import time
+
+        mw.taskman.run_on_main(self._show_answer)
+        time.sleep(0.5)
+        if self._back_text:
+            answer_prefix = self._get_localized_prompt("answer_was")
+            self.tts.set_rate(self.config.tts.back_rate)
+            self.tts.speak(f"{answer_prefix} {self._back_text}", blocking=True)
+        self.tts.speak(self._get_localized_prompt("say_rating_or_skip"), blocking=True)
+        rating_response = self.stt.listen_and_recognize(
+            on_recording_start=self._on_recording_start,
+            on_recording_end=self._on_recording_end,
+        )
+        if self.stt.last_error:
+            self._handle_error(f"Local speech recognition failed: {self.stt.last_error}")
+            return
+        self._show_recognized_text(rating_response)
+        if not self.is_active:
+            return
+        rating = self._parse_voice_rating(rating_response) if rating_response else None
+        if rating:
+            self._show_rating_indicator(rating)
+            self._apply_rating_after_answer(rating)
+        else:
+            self.tts.speak(self._get_localized_prompt("skipping"), blocking=True)
+            self._skip_card()
 
     def _extract_card_text(self, card: Card, note, include_fields: list[str] | None = None) -> tuple[str, str]:
         """
@@ -918,7 +921,8 @@ class HandsFreeReviewer:
         if not text:
             return None
 
-        text = text.lower().strip()
+        import re
+        text = re.sub(r"[^\w\s]", " ", text.lower()).strip()
 
         # Direct number matches
         rating_map = {
@@ -964,7 +968,8 @@ class HandsFreeReviewer:
         if not text:
             return None
 
-        text = text.lower().strip()
+        import re
+        text = re.sub(r"[^\w\s]", " ", text.lower()).strip()
         words = set(text.split())
 
         # Get configurable word lists from config
