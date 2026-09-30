@@ -149,3 +149,68 @@ were placed in the repository or committed. Do not treat this single local
 recognition result as a Sanskrit-accuracy pass; a general recognition
 improvement and another known-audio validation are needed before merging the
 stack under the current validation gate.
+
+### Revised known-audio check: exact comparison and near-match decision
+
+On 2026-09-30 the same two recordings were replayed through the real local path
+in a fresh disposable Anki profile after the uncertain-answer flow was
+implemented. `STTService._recognize_audio()` selected a provider chain of
+`['offline_whisper']` only and called the local worker with
+`HF_HUB_OFFLINE=1`, `TRANSFORMERS_OFFLINE=1`, model
+`~/.local/share/Anki2/hands-free-anki-runtime/models/whisper-medium`,
+`device=cuda`, `compute_type=int8_float16`, and language `sa` (from the `sa-IN`
+preset). Google and Sphinx fallback flags were left enabled and were never
+invoked. A separate probe using the same interpreter, model, and compute type
+confirmed one CUDA device through ctranslate2 4.8.2, `int8_float16` among the
+supported CUDA compute types, 2,330 MiB in use before model load and 3,457 MiB
+after, a 0.31 s transcription, and automatic language detection of `sa` with
+probability 1.0. Its transcript was identical to the add-on transcript.
+
+The Sanskrit recording again returned `नमस्ते, रामह पत्थति`. Normalized, the
+expected phrase is `namaste rāmaḥ paṭhati` and the recognized phrase is
+`namaste rāmaha patthati`. This is **still not an exact canonical
+transcription**; the earlier exact-only failure above remains accurate as
+historical evidence.
+
+A Sanskrit-aware near-match decision is now reported alongside that comparison.
+It requires the same number of words in the same order, compares normalized
+syllable units, and accepts only the documented consonant variants `ḥ`/`ha` and
+`ṭh`/`tth`, with at most one variant unit per word and a minimum similarity of
+0.6. For this recording the decision is a near match at similarity 0.8889, with
+every non-exact difference listed: `rāmaḥ: ḥ ↔ ha` and
+`paṭhati: ṭha ↔ ttha`. The rating recording again returned `3` and
+`HandsFreeReviewer._parse_voice_rating()` resolved it to rating 3.
+
+The near match is a validation diagnostic only. On a real card in the
+disposable collection, strict grading of the same transcript still returned
+`incorrect` while the canonical phrase returned `correct`, and the near-match
+outcome never applies a rating by itself.
+
+Review outcomes were exercised against the real
+`HandsFreeReviewer._finish_answer_attempt()` in the same profile, with isolated
+doubles for TTS, speech input, and the Anki rating callback:
+
+| Outcome | Behaviour observed |
+| --- | --- |
+| `exact` | Speaks `उत्तरम् आसीत्: नमस्ते रामः पठति`, then applies Good (3) automatically |
+| `near_match` | Reveals the answer, speaks the final answer, asks for a rating, applies the spoken rating |
+| `unclear` | States that nothing was heard, reveals and speaks the final answer, asks for a rating, applies the spoken rating |
+| `wrong` | Reveals the answer, speaks the final answer, asks for a rating, applies the spoken rating |
+
+Only the exact outcome auto-rated. The other three revealed the answer, spoke
+it, prompted `एकम्, द्वे, त्रीणि, चत्वारि वा वदतु; मौने कार्डं त्यजतु।`, listened,
+and applied the requested rating. No non-exact outcome applied a grade on its
+own.
+
+#### Runtime dependency note for Anki 26
+
+This run also exposed an install-time issue unrelated to the answer flow.
+Anki 26.09.3 bundles CPython 3.13, which no longer ships `audioop` or `aifc`,
+and SpeechRecognition imports both at module scope. In the disposable profile
+the offline path was made to run by placing the `audioop-lts` backport and a
+minimal `aifc` stub in the add-on `vendor` directory; the audio itself is
+16 kHz PCM, so no AIFF decoding is involved. A real installation on Anki 26
+without those modules fails inside `STTService._recognize_audio()` with
+`ModuleNotFoundError: No module named 'audioop'` rather than falling back to a
+cloud provider. If you see that error, check the add-on `vendor` directory
+before re-running the setup script.
